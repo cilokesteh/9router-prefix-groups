@@ -47,6 +47,7 @@ PROVIDER_REGISTRY = {
     "iflow":      {"name": "iFlow",                  "baseUrl": "https://inference.iflow.ai/v1",          "apiType": "chat"},
     "perplexity": {"name": "Perplexity",             "baseUrl": "https://api.perplexity.ai",              "apiType": "chat"},
     "oc":         {"name": "OpenCode",               "baseUrl": "https://opencode.ai/zen/v1",             "apiType": "chat"},
+    "kiro":       {"name": "Kiro AI",                "baseUrl": "https://runtime.us-east-1.kiro.dev",     "apiType": "chat"},
     "bluesminds": {"name": "BlueSminds",             "baseUrl": "https://api.bluesminds.com/v1",          "apiType": "chat"},
     # ── Embeddings ──
     "voyage":     {"name": "Voyage AI",              "baseUrl": "https://api.voyageai.com/v1",            "apiType": "embedding"},
@@ -77,16 +78,22 @@ def get_conn(db_path):
 
 
 def load_active_nodes(conn):
-    """Return provider nodes that have at least one active API key connection."""
+    """Return provider nodes that have at least one active connection
+    with a valid credential (apiKey OR oauth accessToken)."""
     rows = conn.execute("""
         SELECT pn.id, pn.name, pn.type, pn.data,
-               pc.authType, pc.data AS connData
-        FROM providerNodes pn
-        JOIN providerConnections pc ON pc.provider = pn.id
+               pc.authType, pc.data AS connData, pc.provider AS conn_provider
+        FROM providerConnections pc
+        LEFT JOIN providerNodes pn ON pn.id = pc.provider
         WHERE pc.isActive = 1
-          AND json_extract(pc.data, '$.apiKey') IS NOT NULL
-          AND json_extract(pc.data, '$.apiKey') != ''
-        ORDER BY pn.name
+          AND (
+            (json_extract(pc.data, '$.apiKey') IS NOT NULL
+             AND json_extract(pc.data, '$.apiKey') != '')
+            OR
+            (json_extract(pc.data, '$.accessToken') IS NOT NULL
+             AND json_extract(pc.data, '$.accessToken') != '')
+          )
+        ORDER BY COALESCE(pn.name, pc.provider)
     """).fetchall()
     return rows
 
@@ -103,13 +110,14 @@ def node_to_dict(row):
         data = json.loads(row["data"]) if row["data"] else {}
     except json.JSONDecodeError:
         data = {}
-    prefix = data.get("prefix", "?")
+    # Node might be missing (only connection exists) → fallback to conn_provider
+    prefix = data.get("prefix") or row["conn_provider"] or "?"
     baseUrl = data.get("baseUrl", "")
-    apiType = data.get("apiType", "")
+    apiType = data.get("apiType", "chat")
     return {
         "id": row["id"],
-        "name": row["name"],
-        "type": row["type"],
+        "name": row["name"] or prefix,
+        "type": row["type"] or "unknown",
         "prefix": prefix,
         "baseUrl": baseUrl,
         "apiType": apiType,
@@ -117,17 +125,34 @@ def node_to_dict(row):
 
 
 def conn_to_info(row):
-    """Extract API key status from a providerConnection row."""
+    """Extract credential status from a providerConnection row.
+    Supports both apiKey (prefixed providers) and OAuth accessToken (kiro etc)."""
     try:
         cd = json.loads(row["connData"]) if row["connData"] else {}
     except json.JSONDecodeError:
         cd = {}
     api_key = cd.get("apiKey", "")
+    access_token = cd.get("accessToken", "")
     test_status = cd.get("testStatus", "unknown")
     backoff = cd.get("backoffLevel", 0)
     last_error = cd.get("lastError", "")
+
+    # OAuth token present → treat as valid credential (status from DB)
+    if access_token and not api_key:
+        at = access_token
+        preview = at[:6] + "..." + at[-4:] if len(at) > 14 else at[:12]
+        return {
+            "has_key": True,
+            "auth": "oauth",
+            "test_status": test_status if test_status != "unknown" else "active",
+            "backoff": backoff,
+            "last_error": last_error[:60] if last_error else "",
+            "key_preview": f"oauth:{preview}",
+        }
+
     return {
         "has_key": bool(api_key),
+        "auth": "apikey",
         "test_status": test_status if api_key else "no_key",
         "backoff": backoff,
         "last_error": last_error[:60] if last_error else "",
