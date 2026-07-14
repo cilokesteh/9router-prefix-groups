@@ -1,64 +1,94 @@
-# 9router Prefix Grouper
+# 9router Provider Manager
 
-Script untuk mengelompokkan semua node provider/model di **9router** berdasarkan
-field `prefix` (contoh: `hcnsec/*`, `nous/*`, `oc/*`).
+Script untuk mengelola **9router provider nodes** — group by prefix, list, dan
+add provider baru langsung ke DB.
 
-9router menyimpan konfigurasi tiap provider di tabel `providerNodes` (SQLite),
-di mana kolom `data` berisi JSON dengan field `prefix`. Script ini membaca DB
-tersebut dan mencetak tampilan terkelompok yang rapi — berguna untuk audit
-prefix mana yang sudah terdaftar dan provider apa yang memetakan ke masing-masing.
+## Fitur
+
+| Perintah | Fungsi |
+|----------|--------|
+| `python3 group_by_prefix.py` | Group by prefix — **hanya tampilin provider yg punya API key valid** |
+| `--registry` | List **semua provider** yg didukung 9router (32+ prefix, bukan cuma yg di DB) |
+| `--add PREFIX --apikey KEY` | Tambah provider + API key langsung ke 9router DB |
+| `--prefix PREFIX` | Filter tampilan utk 1 prefix aja |
+| `--json` | Output JSON (buat scripting) |
+| `--baseurl URL` | Base URL kustom (utk prefix custom di luar registry) |
+
+## Cara Kerja
+
+Baca tabel `providerNodes` + `providerConnections` dari SQLite DB 9router
+(`~/.9router/db/data.sqlite`), JOIN dua tabel, dan tampilkan provider yang
+memiliki API key aktif.
+
+## Registry Provider
+
+`--registry` nampilin semua provider yg didukung 9router (32 prefix):
+
+**Chat:** hcnsec, kimi, minimax, openai, deepseek, groq, xai, mistral, qwen,
+openrouter, nvidia, gemini, together, fireworks, cohere, anthropic, iflow,
+perplexity, oc, bluesminds
+
+**Embedding:** voyage, jina
+
+**Image:** fal, stability, recraft
+
+**TTS/STT:** elevenlabs, deepgram
+
+**Web Search:** tavily, brave, serper, exa
 
 ## Install
 
 ```bash
 git clone https://github.com/cilokesteh/9router-prefix-groups.git
 cd 9router-prefix-groups
-# butuh python3 stdlib saja (sqlite3, json, argparse) — gak perlu pip install
+# stdlib only — no pip install needed
 ```
 
 ## Usage
 
 ```bash
-# Tampilan tabel (default)
+# Group by prefix (default) — hanya yg ada API key
 python3 group_by_prefix.py
 
-# Output JSON
-python3 group_by_prefix.py --json
+# List semua provider yg didukung 9router
+python3 group_by_prefix.py --registry
+
+# Tambah provider baru + API key
+python3 group_by_prefix.py --add deepseek --apikey sk-xxx...
 
 # Filter satu prefix
 python3 group_by_prefix.py --prefix hcnsec
 
-# DB custom
-python3 group_by_prefix.py --db /path/to/data.sqlite
+# Output JSON
+python3 group_by_prefix.py --json
 ```
-
-DB default: `~/.9router/db/data.sqlite`
 
 ## Contoh Output
 
 ```
-🔹 Prefix: bluesminds  (1 node)
+🔹 hcnsec (GLM Coding (HCN))  [3 key(s)]
 ────────────────────────────────────────────────────────────
-  • bluesminds     [openai-compatible]
-      baseUrl : https://api.bluesminds.com/v1
-      apiType : chat
+  ✅   active | sk-Cn5oI...znxG
+  ✅   active | sk-27e8H...85uc
+  ✅   active | sk-j9uhR...WBhZ
+      baseUrl: https://api.hcnsec.cn/v1
+      type:    chat
 
-🔹 Prefix: hcnsec  (1 node)
+🔹 oc (OpenCode)  [4 key(s)]
 ────────────────────────────────────────────────────────────
-  • hcnsec        [openai-compatible]
-      baseUrl : https://api.hcnsec.cn/v1
-      apiType : chat
+  ✅   active | sk-c8KuD...NBNJ
+  ✅   active | sk-jAjPX...fgyz
+  ✅   active | sk-fdnZi...3wPF
+  ✅   active | sk-aUlA3...mj9d
+      baseUrl: https://opencode.ai/zen/v1
+      type:    chat
 
-🔹 Prefix: oc  (1 node)
-────────────────────────────────────────────────────────────
-  • Opencode      [openai-compatible]
-      baseUrl : https://opencode.ai/zen/v1
-      apiType : chat
-
-✅ Total: 3 nodes, 3 prefixes
+✅ Total: 8 API keys across 3 providers (dengan key valid)
 ```
 
 ## Catatan
 
-- Script read-only — tidak mengubah DB 9router.
-- Butuh akses baca ke file DB 9router (pastikan user punya permission).
+- **Read-only saat default** — tidak mengubah DB 9router.
+- **`--add`** bisa nulis ke DB (tambah providerNode + providerConnection).
+- Script cuma buat **provider tipe apikey** (bukan OAuth kayak Claude Code / GitHub Copilot).
+- API key disimpan di tabel `providerConnections` — 9router akan auto-test saat request pertama.
