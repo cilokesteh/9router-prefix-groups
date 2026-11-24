@@ -294,7 +294,8 @@ def fetch_portal_models(refresh: bool = False) -> list:
         age = time.time() - PORTAL_CACHE.stat().st_mtime
         if age < PORTAL_TTL:
             try:
-                return json.loads(PORTAL_CACHE.read_text())
+                cached = json.loads(PORTAL_CACHE.read_text())
+                return cached.get("data", []) if isinstance(cached, dict) else cached
             except Exception:
                 pass
     req = urllib.request.Request(
@@ -304,7 +305,7 @@ def fetch_portal_models(refresh: bool = False) -> list:
         data = json.loads(r.read().decode())
     PORTAL_CACHE.parent.mkdir(parents=True, exist_ok=True)
     PORTAL_CACHE.write_text(json.dumps(data))
-    return data
+    return data.get("data", []) if isinstance(data, dict) else data
 
 
 # --------------------------------------------------------------------------- #
